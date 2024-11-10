@@ -4,26 +4,8 @@
 # Author: Adapted from community script
 # License: MIT
 
-# Load Community Functions from build.func
-BUILD_FUNC_URL="https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func"
-MISC_DIR="/tmp/proxmox_misc_functions"
-mkdir -p "$MISC_DIR"
-
-if wget -qO "$MISC_DIR/build.func" "$BUILD_FUNC_URL"; then
-    source "$MISC_DIR/build.func"
-else
-    echo "Error: Failed to download community functions from $BUILD_FUNC_URL."
-    exit 1
-fi
-
-# Verify that key functions are loaded
-REQUIRED_FUNCTIONS=(color verb_ip6 catch_errors setting_up_container network_check update_os)
-for func in "${REQUIRED_FUNCTIONS[@]}"; do
-    if ! declare -f "$func" > /dev/null; then
-        echo "Error: Function $func not found. Check the community script dependencies."
-        exit 1
-    fi
-done
+# Source Community Functions directly from GitHub
+source <(curl -s https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
 
 # Header Function
 function header_info {
@@ -42,7 +24,7 @@ EOF
 # Display the header
 header_info
 
-# Run utility functions (assuming they are loaded correctly)
+# Utility Functions (loaded from build.func)
 color
 verb_ip6
 catch_errors
@@ -96,4 +78,29 @@ services:
       - "$FLAME_PORT:5005"
     volumes:
       - "$FLAME_DATA_PATH:/app/data"
-      - "/var/run
+      - "/var/run/docker.sock:/var/run/docker.sock" # optional for Docker integration
+    environment:
+      - PASSWORD=$FLAME_PASSWORD
+    restart: unless-stopped
+EOF
+msg_ok "Docker Compose Configuration Created"
+
+# Run Flame with Docker Compose
+msg_info "Starting Flame"
+cd "$(dirname "$FLAME_COMPOSE_FILE")" || exit
+$STD docker-compose up -d
+msg_ok "Flame Started"
+
+# Cleanup
+msg_info "Cleaning up"
+rm get-docker.sh
+$STD apt-get -y autoremove
+$STD apt-get -y autoclean
+msg_ok "Cleaned up installation files"
+
+# Display MOTD or customization function (if defined)
+motd_ssh
+customize
+
+echo "Flame is now installed and running on port $FLAME_PORT."
+echo "Access Flame at http://<Proxmox_IP>:$FLAME_PORT with the password you set."
