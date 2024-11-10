@@ -4,6 +4,27 @@
 # Author: Adapted from community script
 # License: MIT
 
+# Define the directory and URL for the community scripts
+MISC_DIR="/tmp/proxmox_misc_functions"
+MISC_URL="https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc"
+
+# Create the temporary directory for downloading community function files
+mkdir -p "$MISC_DIR"
+
+# List of function files to download and source
+FUNCTION_FILES=("build.func" "catch_errors.func" "color.func" "motd_ssh.func" "network_check.func" "update_os.func")
+
+# Download each function file and source it
+for FILE in "${FUNCTION_FILES[@]}"; do
+    wget -qO "$MISC_DIR/$FILE" "$MISC_URL/$FILE"
+    if [[ -f "$MISC_DIR/$FILE" ]]; then
+        source "$MISC_DIR/$FILE"
+    else
+        echo "Error: Failed to download $FILE from $MISC_URL."
+        exit 1
+    fi
+done
+
 # Header Function
 function header_info {
 clear
@@ -21,10 +42,7 @@ EOF
 # Display the header
 header_info
 
-# Load external functions if applicable (adapt to your setup)
-source /dev/stdin <<< "$FUNCTIONS_FILE_PATH"
-
-# Utility Functions (these would normally be sourced or provided by the Proxmox setup)
+# Utility Functions (loaded from downloaded function files)
 color
 verb_ip6
 catch_errors
@@ -97,6 +115,9 @@ rm get-docker.sh
 $STD apt-get -y autoremove
 $STD apt-get -y autoclean
 msg_ok "Cleaned up installation files"
+
+# Remove the downloaded function files
+rm -rf "$MISC_DIR"
 
 # Display MOTD or customization function (if defined)
 motd_ssh
