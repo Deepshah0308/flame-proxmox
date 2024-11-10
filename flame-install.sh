@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-source <(curl -s https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
-# Copyright (c) 2024 Deep Shah
-# License: MIT
-# GitHub: https://github.com/Deepshah0308
 
+# Flame Installation Script for Proxmox VE
+# Author: Adapted from community script
+# License: MIT
+
+# Header Function
 function header_info {
 clear
 cat <<"EOF"
@@ -17,98 +18,89 @@ ______ _       ___  ___  ___ _____
 EOF
 }
 
+# Display the header
 header_info
-echo -e "Loading..."
-APP="Flame"
-var_disk="4"
-var_cpu="1"
-var_ram="512"
-var_os="debian"
-var_version="12"
-variables
+
+# Load external functions if applicable (adapt to your setup)
+source /dev/stdin <<< "$FUNCTIONS_FILE_PATH"
+
+# Utility Functions (these would normally be sourced or provided by the Proxmox setup)
 color
+verb_ip6
 catch_errors
+setting_up_container
+network_check
+update_os
 
-function default_settings() {
-  CT_TYPE="1"
-  PW=""
-  CT_ID=$NEXTID
-  HN=$NSAPP
-  DISK_SIZE="$var_disk"
-  CORE_COUNT="$var_cpu"
-  RAM_SIZE="$var_ram"
-  BRG="vmbr0"
-  NET="dhcp"
-  GATE=""
-  APT_CACHER=""
-  APT_CACHER_IP=""
-  DISABLEIP6="no"
-  MTU=""
-  SD=""
-  NS=""
-  MAC=""
-  VLAN=""
-  SSH="no"
-  VERB="no"
-  echo_default
-}
+# Variables
+FLAME_DATA_PATH="/opt/flame/data"
+FLAME_PORT=5005
 
-function install_flame() {
-  header_info
-  msg_info "Installing dependencies"
-  apt update && apt install -y curl git docker.io
+# Prompt for the Flame password
+echo "Please enter a password for Flame (will be used for accessing the Flame interface):"
+read -s FLAME_PASSWORD
+echo "Password set."
 
-  msg_info "Cloning Flame repository"
-  git clone https://github.com/pawelmalak/flame.git /opt/${APP}
+msg_info "Installing Dependencies"
+$STD apt-get install -y curl sudo mc
+msg_ok "Installed Dependencies"
 
-  if [[ -d "/opt/${APP}" ]]; then
-    msg_info "Setting up Flame container"
-    docker run -d \
-      --name=${APP} \
-      -p 5005:5005 \
-      -v /opt/${APP}/data:/app/data \
-      -e PASSWORD=flame_password \
-      pawelmalak/flame
+# Install Docker
+msg_info "Installing Docker"
+curl -fsSL https://get.docker.com -o get-docker.sh
+$STD sh get-docker.sh
+msg_ok "Docker Installed"
 
-    # Check if container started successfully
-    if docker ps | grep -q ${APP}; then
-      msg_ok "Flame container is running."
-      
-      # Retrieve container IP
-      FLAME_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${APP})
-      
-      if [[ -z "${FLAME_IP}" ]]; then
-        msg_error "Failed to retrieve the IP address. Please check Docker network settings."
-      else
-        msg_ok "Flame is reachable at: http://${FLAME_IP}:5005"
-      fi
-    else
-      msg_error "Flame container did not start. Please check Docker logs for more information."
-      exit 1
-    fi
-  else
-    msg_error "Failed to clone Flame repository. Please check network connection and repository URL."
-    exit 1
-  fi
-}
+# Install Docker Compose
+msg_info "Installing Docker Compose"
+DOCKER_COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep -Po '"tag_name": "\K.*?(?=")')
+curl -L "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
+msg_ok "Docker Compose Installed"
 
-function update_script() {
-  header_info
-  if [[ ! -d /opt/${APP} ]]; then msg_error "No ${APP} Installation Found!"; exit; fi
-  msg_info "Updating ${APP}"
+# Setup Flame Data Directory
+msg_info "Setting up Flame data directory"
+mkdir -p "$FLAME_DATA_PATH"
+msg_ok "Data Directory Created"
 
-  cd /opt/${APP} || exit
-  git pull
-  docker-compose down
-  docker-compose up -d
-  msg_ok "${APP} update completed"
-}
+# Create Docker Compose Configuration
+msg_info "Configuring Docker Compose for Flame"
+FLAME_COMPOSE_FILE="/opt/flame/docker-compose.yml"
+mkdir -p "$(dirname "$FLAME_COMPOSE_FILE")"
+cat <<EOF > "$FLAME_COMPOSE_FILE"
+version: '3.6'
 
-start
-build_container
-description
-install_flame
+services:
+  flame:
+    image: pawelmalak/flame
+    container_name: flame
+    ports:
+      - "$FLAME_PORT:5005"
+    volumes:
+      - "$FLAME_DATA_PATH:/app/data"
+      - "/var/run/docker.sock:/var/run/docker.sock" # optional for Docker integration
+    environment:
+      - PASSWORD=$FLAME_PASSWORD
+    restart: unless-stopped
+EOF
+msg_ok "Docker Compose Configuration Created"
 
-msg_ok "Installation Completed Successfully!"
-echo -e "${APP} should be reachable by going to the following URL (if IP retrieval succeeded):
-         http://${FLAME_IP}:5005 \n"
+# Run Flame with Docker Compose
+msg_info "Starting Flame"
+cd "$(dirname "$FLAME_COMPOSE_FILE")" || exit
+$STD docker-compose up -d
+msg_ok "Flame Started"
+
+# Cleanup
+msg_info "Cleaning up"
+rm get-docker.sh
+$STD apt-get -y autoremove
+$STD apt-get -y autoclean
+msg_ok "Cleaned up installation files"
+
+# Display MOTD or customization function (if defined)
+motd_ssh
+customize
+
+echo "Flame is now installed and running on port $FLAME_PORT."
+echo "Access Flame at http://<Proxmox_IP>:$FLAME_PORT with the password you set."
