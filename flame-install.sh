@@ -7,12 +7,13 @@ source <(curl -s https://raw.githubusercontent.com/community-scripts/ProxmoxVE/m
 function header_info {
 clear
 cat <<"EOF"
-   ______
-   / ____/__  ____  _______  _______
-  / /_  / _ \/ __ \/ ___/ / / / ___/
- / __/ /  __/ / / / /  / /_/ (__  )
-/_/    \___/_/ /_/_/   \__,_/____/
-
+______ _       ___  ___  ___ _____ 
+|  ___| |     / _ \ |  \/  ||  ___|
+| |_  | |    / /_\ \| .  . || |__  
+|  _| | |    |  _  || |\/| ||  __| 
+| |   | |____| | | || |  | || |___ 
+\_|   \_____/\_| |_/\_|  |_/\____/ 
+                                   
 EOF
 }
 
@@ -52,41 +53,62 @@ function default_settings() {
   echo_default
 }
 
+function install_flame() {
+  header_info
+  msg_info "Installing dependencies"
+  apt update && apt install -y curl git docker.io
+
+  msg_info "Cloning Flame repository"
+  git clone https://github.com/pawelmalak/flame.git /opt/${APP}
+
+  if [[ -d "/opt/${APP}" ]]; then
+    msg_info "Setting up Flame container"
+    docker run -d \
+      --name=${APP} \
+      -p 5005:5005 \
+      -v /opt/${APP}/data:/app/data \
+      -e PASSWORD=flame_password \
+      pawelmalak/flame
+
+    # Check if container started successfully
+    if docker ps | grep -q ${APP}; then
+      msg_ok "Flame container is running."
+      
+      # Retrieve container IP
+      FLAME_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${APP})
+      
+      if [[ -z "${FLAME_IP}" ]]; then
+        msg_error "Failed to retrieve the IP address. Please check Docker network settings."
+      else
+        msg_ok "Flame is reachable at: http://${FLAME_IP}:5005"
+      fi
+    else
+      msg_error "Flame container did not start. Please check Docker logs for more information."
+      exit 1
+    fi
+  else
+    msg_error "Failed to clone Flame repository. Please check network connection and repository URL."
+    exit 1
+  fi
+}
+
 function update_script() {
-header_info
-if [[ ! -d /opt/${APP} ]]; then msg_error "No ${APP} Installation Found!"; exit; fi
-msg_error "There is currently no update path available."
-exit
-msg_info "Updating ${APP}"
-systemctl stop ${APP}
-git clone https://github.com/pawelmalak/flame.git
-cd flame || exit
-gitVersionNumber=$(git rev-parse HEAD)
+  header_info
+  if [[ ! -d /opt/${APP} ]]; then msg_error "No ${APP} Installation Found!"; exit; fi
+  msg_info "Updating ${APP}"
 
-if [[ "${gitVersionNumber}" != "$(cat /opt/${APP}_version.txt)" ]] || [[ ! -f /opt/${APP}_version.txt ]]; then
-  mkdir /opt/flame-data-backup
-  cp -r "/opt/${APP}/data/" /opt/flame-data-backup/data
-  if [[ ! -d /opt/flame-data-backup/data ]]; then msg_error "Backup of data folder failed! Exiting..."; rm -r /opt/flame-data-backup/; exit; fi 
-  export DOTNET_CLI_TELEMETRY_OPTOUT=1
-  dotnet publish -c Release -o "/opt/${APP}/" flame.csproj
-  cp -r /opt/flame-data-backup/data/ "/opt/${APP}/"
-  echo "${gitVersionNumber}" >"/opt/${APP}_version.txt"
-  rm -r /opt/flame-data-backup/
-  msg_ok "Updated ${APP}"
-else
-  msg_ok "No update required. ${APP} is already up to date"
-fi
-cd ..
-rm -r flame/
-
-systemctl start ${APP}
-exit
+  cd /opt/${APP} || exit
+  git pull
+  docker-compose down
+  docker-compose up -d
+  msg_ok "${APP} update completed"
 }
 
 start
 build_container
 description
+install_flame
 
-msg_ok "Completed Successfully!\n"
-echo -e "${APP} should be reachable by going to the following URL.
-         http://${IP}:5005 \n"
+msg_ok "Installation Completed Successfully!"
+echo -e "${APP} should be reachable by going to the following URL (if IP retrieval succeeded):
+         http://${FLAME_IP}:5005 \n"
